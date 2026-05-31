@@ -1,0 +1,10 @@
+name: FireFight-OG
+author: NotAlexNoyle
+description: WorldGuard flag based fire fighting and fluid mechanics for combat regions.
+website: https://github.com/true-og/FireFight-OG/
+version: '${version}'
+api-version: '${apiVersion}'
+main: net.trueog.firefightog.FireFightOG
+depend:
+  - Utilities-OG
+  - WorldGuard
