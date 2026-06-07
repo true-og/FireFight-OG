@@ -1,3 +1,4 @@
 fire-extinguish: true
 temporary-fluids: true
+temporary-cobwebs: true
 fluid-lifetime-seconds: 60

@@ -18,8 +18,10 @@ import com.sk89q.worldguard.protection.flags.registry.FlagRegistry;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 
+import net.trueog.firefightog.cobweb.CobwebManager;
 import net.trueog.firefightog.fire.FireManager;
 import net.trueog.firefightog.fluid.FluidManager;
+import net.trueog.firefightog.listeners.CobwebListener;
 import net.trueog.firefightog.listeners.FireExtinguishListener;
 import net.trueog.firefightog.listeners.FluidListener;
 import net.trueog.utilitiesog.UtilitiesOG;
@@ -33,13 +35,19 @@ public class FireFightOG extends JavaPlugin {
 
     public static final String TEMPORARY_FLUIDS_NAME = "temporary-fluids";
 
+    public static final String TEMPORARY_COBWEBS_NAME = "temporary-cobwebs";
+
     private static StateFlag fireExtinguish;
 
     private static StateFlag temporaryFluids;
 
+    private static StateFlag temporaryCobwebs;
+
     private FluidManager fluidManager;
 
     private FireManager fireManager;
+
+    private CobwebManager cobwebManager;
 
     // WorldGuard only accepts flag registration during onLoad.
     @Override
@@ -56,6 +64,7 @@ public class FireFightOG extends JavaPlugin {
 
             fireExtinguish = registerStateFlag(FIRE_EXTINGUISH_NAME);
             temporaryFluids = registerStateFlag(TEMPORARY_FLUIDS_NAME);
+            temporaryCobwebs = registerStateFlag(TEMPORARY_COBWEBS_NAME);
 
         } catch (FlagRegistrationException flagregistrationException) {
 
@@ -91,17 +100,24 @@ public class FireFightOG extends JavaPlugin {
 
         }
 
-        if (!config.getBoolean("temporary-fluids")) {
+        if (config.getBoolean("temporary-fluids")) {
 
-            return;
+            final long lifetimeSeconds = config.getLong("fluid-lifetime-seconds");
+            fluidManager = new FluidManager(this, lifetimeSeconds);
+            pluginManager.registerEvents(new FluidListener(fluidManager), this);
+            UtilitiesOG.logToConsole(PREFIX, "Enabled temporary-fluids module (lifetime " + lifetimeSeconds + "s).");
 
         }
 
-        final long lifetimeSeconds = config.getLong("fluid-lifetime-seconds");
-        fluidManager = new FluidManager(this, lifetimeSeconds);
+        if (config.getBoolean("temporary-cobwebs")) {
 
-        pluginManager.registerEvents(new FluidListener(fluidManager), this);
-        UtilitiesOG.logToConsole(PREFIX, "Enabled temporary-fluids module (lifetime " + lifetimeSeconds + "s).");
+            final long cobwebLifetimeSeconds = config.getLong("fluid-lifetime-seconds");
+            cobwebManager = new CobwebManager(this, cobwebLifetimeSeconds);
+            pluginManager.registerEvents(new CobwebListener(cobwebManager), this);
+            UtilitiesOG.logToConsole(PREFIX,
+                    "Enabled temporary-cobwebs module (lifetime " + cobwebLifetimeSeconds + "s).");
+
+        }
 
     }
 
@@ -120,6 +136,12 @@ public class FireFightOG extends JavaPlugin {
 
         }
 
+        if (cobwebManager != null) {
+
+            cobwebManager.shutdown();
+
+        }
+
     }
 
     public static StateFlag fireExtinguish() {
@@ -131,6 +153,12 @@ public class FireFightOG extends JavaPlugin {
     public static StateFlag temporaryFluids() {
 
         return temporaryFluids;
+
+    }
+
+    public static StateFlag temporaryCobwebs() {
+
+        return temporaryCobwebs;
 
     }
 
