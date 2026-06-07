@@ -18,6 +18,8 @@ import org.bukkit.event.block.BlockFormEvent;
 import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.ItemStack;
 
 import com.sk89q.worldguard.bukkit.event.block.BreakBlockEvent;
 import com.sk89q.worldguard.bukkit.event.block.PlaceBlockEvent;
@@ -64,34 +66,62 @@ public class FluidListener implements Listener {
 
     }
 
-    // Survival-mode water/lava bucket in a temporary-fluids region.
+    // Pre-allow water/lava bucket placement on both the PlayerInteractEvent
+    // and PlayerBucketEmptyEvent paths so the interact never cancels first.
     private void handlePlayerBucketEmpty(PlaceBlockEvent event) {
 
+        final Material effective = event.getEffectiveMaterial();
+        if (effective != Material.WATER && effective != Material.LAVA) {
+
+            return;
+
+        }
+
         final Event original = event.getOriginalEvent();
-        if (!(original instanceof PlayerBucketEmptyEvent emptyEvent)) {
+        final Player player;
+
+        if (original instanceof PlayerBucketEmptyEvent emptyEvent) {
+
+            final Material bucket = emptyEvent.getBucket();
+            if (bucket != Material.WATER_BUCKET && bucket != Material.LAVA_BUCKET) {
+
+                return;
+
+            }
+
+            player = emptyEvent.getPlayer();
+
+        } else if (original instanceof PlayerInteractEvent interactEvent) {
+
+            final ItemStack item = interactEvent.getItem();
+            if (item == null || (item.getType() != Material.WATER_BUCKET && item.getType() != Material.LAVA_BUCKET)) {
+
+                return;
+
+            }
+
+            player = interactEvent.getPlayer();
+
+        } else {
 
             return;
 
         }
 
         // Creative-mode placements are builder/world fluid; leave them alone.
-        if (emptyEvent.getPlayer().getGameMode() == GameMode.CREATIVE) {
+        if (player.getGameMode() == GameMode.CREATIVE) {
 
             return;
 
         }
 
-        final Material bucket = emptyEvent.getBucket();
-        if (bucket != Material.WATER_BUCKET && bucket != Material.LAVA_BUCKET) {
+        for (Block block : event.getBlocks()) {
 
-            return;
+            if (!FireFightOG.allows(block.getLocation(), FireFightOG.temporaryFluids())) {
 
-        }
+                return;
 
-        final Block target = emptyEvent.getBlock();
-        if (!FireFightOG.allows(target.getLocation(), FireFightOG.temporaryFluids())) {
-
-            return;
+            }
 
         }
 

@@ -86,7 +86,7 @@ public class FireFightOG extends JavaPlugin {
 
             final long fireLifetimeSeconds = config.getLong("fluid-lifetime-seconds");
             fireManager = new FireManager(this, fireLifetimeSeconds);
-            pluginManager.registerEvents(new FireExtinguishListener(fireManager), this);
+            pluginManager.registerEvents(new FireExtinguishListener(this, fireManager), this);
             UtilitiesOG.logToConsole(PREFIX, "Enabled fire-extinguish module (lifetime " + fireLifetimeSeconds + "s).");
 
         }
