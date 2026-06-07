@@ -2,20 +2,29 @@
 // Author: NotAlexNoyle.
 package net.trueog.firefightog.listeners;
 
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Waterlogged;
+import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
+import org.bukkit.event.Event.Result;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockFormEvent;
+import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+
+import com.sk89q.worldguard.bukkit.event.block.BreakBlockEvent;
+import com.sk89q.worldguard.bukkit.event.block.PlaceBlockEvent;
 
 import net.trueog.firefightog.FireFightOG;
 import net.trueog.firefightog.fluid.FluidManager;
 
-// Lets players deploy water/lava in temporary-fluids regions without permanent terrain changes.
 public class FluidListener implements Listener {
 
     private final FluidManager fluids;
@@ -26,10 +35,165 @@ public class FluidListener implements Listener {
 
     }
 
-    // HIGH runs after WorldGuard so we can re-allow placement inside
-    // temporary-fluids regions.
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
+    // Pre-allow WG's synthetic PlaceBlockEvent for player bucket-empty and for
+    // tracked liquid flow before WG's NORMAL handler can deny it.
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = false)
+    public void onWgPlaceBlock(PlaceBlockEvent event) {
+
+        if (event.getExplicitResult() == Result.DENY) {
+
+            return;
+
+        }
+
+        final Object root = event.getCause().getRootCause();
+
+        if (root instanceof Player) {
+
+            handlePlayerBucketEmpty(event);
+            return;
+
+        }
+
+        if (root instanceof Block sourceBlock) {
+
+            handleLiquidFlow(event, sourceBlock);
+            return;
+
+        }
+
+    }
+
+    // Survival-mode water/lava bucket in a temporary-fluids region.
+    private void handlePlayerBucketEmpty(PlaceBlockEvent event) {
+
+        final Event original = event.getOriginalEvent();
+        if (!(original instanceof PlayerBucketEmptyEvent emptyEvent)) {
+
+            return;
+
+        }
+
+        // Creative-mode placements are builder/world fluid; leave them alone.
+        if (emptyEvent.getPlayer().getGameMode() == GameMode.CREATIVE) {
+
+            return;
+
+        }
+
+        final Material bucket = emptyEvent.getBucket();
+        if (bucket != Material.WATER_BUCKET && bucket != Material.LAVA_BUCKET) {
+
+            return;
+
+        }
+
+        final Block target = emptyEvent.getBlock();
+        if (!FireFightOG.allows(target.getLocation(), FireFightOG.temporaryFluids())) {
+
+            return;
+
+        }
+
+        event.setAllowed(true);
+
+    }
+
+    // Allow flow only from FF-tracked sources so natural pools cannot leak in.
+    private void handleLiquidFlow(PlaceBlockEvent event, Block sourceBlock) {
+
+        final Material sourceType = sourceBlock.getType();
+        if (sourceType != Material.WATER && sourceType != Material.LAVA) {
+
+            return;
+
+        }
+
+        final Material effective = event.getEffectiveMaterial();
+        if (effective != Material.WATER && effective != Material.LAVA) {
+
+            return;
+
+        }
+
+        if (!fluids.isTrackedAs(sourceBlock.getLocation(), sourceType)) {
+
+            return;
+
+        }
+
+        for (Block block : event.getBlocks()) {
+
+            if (!FireFightOG.allows(block.getLocation(), FireFightOG.temporaryFluids())) {
+
+                return;
+
+            }
+
+        }
+
+        event.setAllowed(true);
+
+    }
+
+    // Bucket-fill on FF-tracked source; resolves the real fluid block from
+    // the original event since WG's blocks list points at the adjacent air.
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = false)
+    public void onWgBreakBlock(BreakBlockEvent event) {
+
+        if (event.getExplicitResult() == Result.DENY) {
+
+            return;
+
+        }
+
+        if (!(event.getCause().getRootCause() instanceof Player)) {
+
+            return;
+
+        }
+
+        final Event original = event.getOriginalEvent();
+        if (!(original instanceof PlayerBucketFillEvent fillEvent)) {
+
+            return;
+
+        }
+
+        final Block source = fillEvent.getBlock();
+        final Material type = source.getType();
+        if (type != Material.WATER && type != Material.LAVA) {
+
+            return;
+
+        }
+
+        if (!FireFightOG.allows(source.getLocation(), FireFightOG.temporaryFluids())) {
+
+            return;
+
+        }
+
+        if (!fluids.isTrackedAs(source.getLocation(), type)) {
+
+            return;
+
+        }
+
+        event.setAllowed(true);
+
+    }
+
+    // Schedule removal of survival-placed sources; creative placements stay
+    // permanent.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketEmpty(PlayerBucketEmptyEvent event) {
+
+        if (event.getPlayer().getGameMode() == GameMode.CREATIVE) {
+
+            return;
+
+        }
 
         final Material fluid;
         if (event.getBucket() == Material.WATER_BUCKET) {
@@ -46,39 +210,107 @@ public class FluidListener implements Listener {
 
         }
 
-        final Block affected = affectedBlock(event);
+        final Block affected = event.getBlock();
         if (!FireFightOG.allows(affected.getLocation(), FireFightOG.temporaryFluids())) {
 
             return;
 
         }
 
-        // Override WorldGuard's build-deny for non-members.
-        event.setCancelled(false);
-
-        // Auto-remove the source after its configured lifetime.
         fluids.track(affected, fluid);
 
     }
 
-    // Allow picking fluids back up in temporary-fluids regions and cancel their
-    // timer.
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
+    // Cancel the removal timer when the player picks the source back up.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketFill(PlayerBucketFillEvent event) {
 
-        final Block source = event.getBlockClicked();
+        final Block source = event.getBlock();
         if (!FireFightOG.allows(source.getLocation(), FireFightOG.temporaryFluids())) {
 
             return;
 
         }
 
-        event.setCancelled(false);
         fluids.untrack(source.getLocation());
 
     }
 
-    // Stop water/lava from generating obsidian, cobblestone, stone or basalt.
+    // Propagate tracking along flow so derived flow cells / merged sources
+    // also expire; the post-tick check rejects phantom destinations.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onFluidFlow(BlockFromToEvent event) {
+
+        final Block from = event.getBlock();
+        final Material fromType = from.getType();
+        if (fromType != Material.WATER && fromType != Material.LAVA) {
+
+            return;
+
+        }
+
+        final Location fromLocation = from.getLocation();
+        if (!fluids.isTrackedAs(fromLocation, fromType)) {
+
+            return;
+
+        }
+
+        final Block to = event.getToBlock();
+        final Location toLocation = to.getLocation();
+        final Material toType = to.getType();
+
+        // Same-fluid destination: don't infect natural pools.
+        if (toType == Material.WATER || toType == Material.LAVA) {
+
+            return;
+
+        }
+
+        // Pure solid (non-waterloggable): WG skips and no fluid actually lands.
+        if (toType.isSolid() && !(to.getBlockData() instanceof Waterlogged)) {
+
+            return;
+
+        }
+
+        if (!FireFightOG.allows(toLocation, FireFightOG.temporaryFluids())) {
+
+            return;
+
+        }
+
+        // Defer tracking until the world has actually mutated.
+        Bukkit.getScheduler().runTask(fluids.getPlugin(), () -> {
+
+            if (!fluids.isTrackedAs(fromLocation, fromType)) {
+
+                return;
+
+            }
+
+            final Material currentType = to.getType();
+            if (currentType == fromType) {
+
+                fluids.track(to, fromType);
+                return;
+
+            }
+
+            if (fromType == Material.WATER && to.getBlockData() instanceof Waterlogged waterlogged
+                    && waterlogged.isWaterlogged())
+            {
+
+                fluids.track(to, fromType);
+
+            }
+
+        });
+
+    }
+
+    // Block obsidian / cobble / stone / basalt formation inside temp-fluids
+    // regions.
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockForm(BlockFormEvent event) {
 
@@ -98,20 +330,6 @@ public class FluidListener implements Listener {
         }
 
         event.setCancelled(true);
-
-    }
-
-    // Mirror WorldGuard's calculation of which block a bucket fills.
-    private Block affectedBlock(PlayerBucketEmptyEvent event) {
-
-        final Block clicked = event.getBlockClicked();
-        if (clicked.getBlockData() instanceof Waterlogged) {
-
-            return clicked;
-
-        }
-
-        return clicked.getRelative(event.getBlockFace());
 
     }
 

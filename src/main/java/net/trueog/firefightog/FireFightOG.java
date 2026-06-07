@@ -18,6 +18,7 @@ import com.sk89q.worldguard.protection.flags.registry.FlagRegistry;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 
+import net.trueog.firefightog.fire.FireManager;
 import net.trueog.firefightog.fluid.FluidManager;
 import net.trueog.firefightog.listeners.FireExtinguishListener;
 import net.trueog.firefightog.listeners.FluidListener;
@@ -37,6 +38,8 @@ public class FireFightOG extends JavaPlugin {
     private static StateFlag temporaryFluids;
 
     private FluidManager fluidManager;
+
+    private FireManager fireManager;
 
     // WorldGuard only accepts flag registration during onLoad.
     @Override
@@ -81,8 +84,10 @@ public class FireFightOG extends JavaPlugin {
 
         if (config.getBoolean("fire-extinguish")) {
 
-            pluginManager.registerEvents(new FireExtinguishListener(), this);
-            UtilitiesOG.logToConsole(PREFIX, "Enabled fire-extinguish module.");
+            final long fireLifetimeSeconds = config.getLong("fluid-lifetime-seconds");
+            fireManager = new FireManager(this, fireLifetimeSeconds);
+            pluginManager.registerEvents(new FireExtinguishListener(fireManager), this);
+            UtilitiesOG.logToConsole(PREFIX, "Enabled fire-extinguish module (lifetime " + fireLifetimeSeconds + "s).");
 
         }
 
@@ -106,6 +111,12 @@ public class FireFightOG extends JavaPlugin {
         if (fluidManager != null) {
 
             fluidManager.shutdown();
+
+        }
+
+        if (fireManager != null) {
+
+            fireManager.shutdown();
 
         }
 

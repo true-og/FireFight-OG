@@ -2,23 +2,137 @@
 // Author: NotAlexNoyle.
 package net.trueog.firefightog.listeners;
 
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Player;
 import org.bukkit.event.Event.Result;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockIgniteEvent;
+import org.bukkit.event.block.BlockIgniteEvent.IgniteCause;
 import org.bukkit.event.player.PlayerInteractEvent;
 
+import com.sk89q.worldguard.bukkit.event.block.BreakBlockEvent;
 import com.sk89q.worldguard.protection.flags.StateFlag;
 
 import net.trueog.firefightog.FireFightOG;
+import net.trueog.firefightog.fire.FireManager;
 
-// Lets players punch out fire in regions flagged fire-extinguish, even where building is denied.
 public class FireExtinguishListener implements Listener {
 
-    // HIGH runs after WorldGuard's NORMAL priority interact handler.
+    private final FireManager fires;
+
+    public FireExtinguishListener(FireManager fires) {
+
+        this.fires = fires;
+
+    }
+
+    // Track survival-mode flint/fireball ignitions as temporary FireFight fire.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onIgnite(BlockIgniteEvent event) {
+
+        final Player player = event.getPlayer();
+        if (player == null) {
+
+            return;
+
+        }
+
+        if (player.getGameMode() == GameMode.CREATIVE) {
+
+            return;
+
+        }
+
+        final IgniteCause cause = event.getCause();
+        if (cause != IgniteCause.FLINT_AND_STEEL && cause != IgniteCause.FIREBALL) {
+
+            return;
+
+        }
+
+        final StateFlag flag = FireFightOG.fireExtinguish();
+        if (flag == null) {
+
+            return;
+
+        }
+
+        final Block block = event.getBlock();
+        if (!FireFightOG.allows(block.getLocation(), flag)) {
+
+            return;
+
+        }
+
+        final Material type = block.getType();
+        if (type != Material.FIRE && type != Material.SOUL_FIRE) {
+
+            return;
+
+        }
+
+        fires.track(block, type);
+
+    }
+
+    // Pre-allow WG's BreakBlockEvent for FF-tracked fire so the extinguish path is
+    // not denied.
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = false)
+    public void onWgBreakBlock(BreakBlockEvent event) {
+
+        if (event.getExplicitResult() == Result.DENY) {
+
+            return;
+
+        }
+
+        if (!(event.getCause().getRootCause() instanceof Player)) {
+
+            return;
+
+        }
+
+        final StateFlag flag = FireFightOG.fireExtinguish();
+        if (flag == null) {
+
+            return;
+
+        }
+
+        for (Block block : event.getBlocks()) {
+
+            final Material type = block.getType();
+            if (type != Material.FIRE && type != Material.SOUL_FIRE) {
+
+                return;
+
+            }
+
+            if (!FireFightOG.allows(block.getLocation(), flag)) {
+
+                return;
+
+            }
+
+            if (!fires.isTrackedAs(block.getLocation(), type)) {
+
+                return;
+
+            }
+
+        }
+
+        event.setAllowed(true);
+
+    }
+
+    // Override useInteractedBlock when the fuel block click would extinguish
+    // FF-tracked fire.
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
     public void onInteract(PlayerInteractEvent event) {
 
@@ -35,7 +149,6 @@ public class FireExtinguishListener implements Listener {
 
         }
 
-        // WorldGuard treats the fire as the clicked block's relative face.
         final Block fire = clicked.getRelative(event.getBlockFace());
 
         final Material type = fire.getType();
@@ -52,8 +165,14 @@ public class FireExtinguishListener implements Listener {
 
         }
 
-        // Override WorldGuard's DENY so players can extinguish the fire.
+        if (!fires.isTrackedAs(fire.getLocation(), type)) {
+
+            return;
+
+        }
+
         event.setUseInteractedBlock(Result.ALLOW);
+        fires.untrack(fire.getLocation());
 
     }
 
